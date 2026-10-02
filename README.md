@@ -1,22 +1,35 @@
 # Policy churn as Filippov sliding in Double Q-learning
 
-Q-learning targets that select actions by argmax, as in Double Q-learning (van Hasselt et al., 2016)
-and its over-relaxed variant Double SOR, make the expected update **discontinuous across
-action-tie manifolds**, the parameter sets where two actions have equal value at some state. Each
-crossing of such a manifold flips the greedy action: it is an instance of policy churn (Schaul et al.,
-2022). This repository shows, on small MDPs with linear features, that
+Q-learning methods that select actions by argmax have update dynamics that are **discontinuous across
+the boundaries between greedy regions** of parameter space. This repository studies one consequence,
+policy churn (Schaul et al., 2022), as **sliding on those boundaries**, quantitatively, in Double(-SOR)
+Q-learning with linear features. It asks:
 
-1. the dynamics can be **attracted to a tie manifold and slide along it**, so that the greedy action
-   keeps flipping at a steady rate, and
-2. the **fraction of time each action is greedy** is predicted by the Filippov weight of the two
-   one-sided drifts, as in Borkar's (2026) analysis of stochastic approximation with drift
-   discontinuous across a manifold.
+1. how often the dynamics are trapped on a greedy-region boundary, where the greedy action keeps flipping;
+2. whether the fraction of time each action is greedy follows the Filippov weight of the two one-sided
+   drifts, including in the small-step limit;
+3. whether this survives a moving target network; and
+4. on intersections of two boundaries (codimension 2), where Filippov's conditions do not determine how
+   time splits between regions, what the stochastic algorithm actually does: the question addressed for
+   SGD by Borkar (2026).
 
 ## Background and attribution
 
-Borkar (2026) analyses constant-step stochastic gradient descent whose drift is discontinuous across a
-lower-dimensional manifold M and points into M from both sides. The iterates are then held near M and
-move along it under the Filippov combination of the one-sided drifts h⁺ and h⁻ (Filippov, 1988):
+**Prior work on these dynamics.** Gopalan & Thoppe (2025) analyse linear DQN with ε-greedy exploration,
+experience replay and a target network. They partition parameter space into greedy regions on which the
+expected update is linear and changes discontinuously across region boundaries, stitch the regional
+dynamics into a differential inclusion by Filippov convexification, and prove that the limit points are
+fixed points of projected Bellman operators that need not correspond to good policies. Their examples
+include iterates that slide along a region boundary to a sliding-mode attractor, and iterates that
+chatter between regions. This answers questions going back to the chattering of linear SARSA (Gordon,
+1996) and the corresponding open problem in Sutton (1999). **The picture of argmax-based Q-learning as a
+system with sliding modes on greedy-region boundaries is theirs**; this repository arrived at it from a
+different direction (below) and adds quantitative checks rather than new theory.
+
+**Discontinuous stochastic approximation.** Borkar (2026) studies constant-step SGD whose drift is
+discontinuous across a lower-dimensional manifold M and points into M from both sides. On a
+codimension-1 manifold the iterates are held near M and move under the classical Filippov combination of
+the one-sided drifts h⁺ and h⁻ (Filippov, 1988),
 
 $$
 g = \frac{\lVert h^-_n\rVert\, h^+ + \lVert h^+_n\rVert\, h^-}{\lVert h^+_n\rVert + \lVert h^-_n\rVert},
@@ -24,43 +37,43 @@ g = \frac{\lVert h^-_n\rVert\, h^+ + \lVert h^+_n\rVert\, h^-}{\lVert h^+_n\rVer
 \alpha = \frac{\lVert h^-_n\rVert}{\lVert h^+_n\rVert + \lVert h^-_n\rVert},
 $$
 
-where h±ₙ are the components normal to M and α is the relative frequency of the '+' side.
-
-Borkar's paper does not discuss reinforcement learning, Q-learning or policy churn. Its main
-theorems (Sections 4–5) assume SGD on a loss, whereas the temporal-difference drift is not the gradient
-of any loss; only the general sliding dynamics of its Section 3, which hold for any discontinuous
-stochastic-approximation drift, are used here. The observation that argmax-based targets create such
-discontinuities, and that churn follows the Filippov occupancy, is this repository's.
+where h±ₙ are the components normal to M and α is the relative frequency of the '+' side. His new results
+concern **codimension ≥ 2**, where the effective dynamics depend on an averaging measure over normal
+directions that, for SGD, the small-noise limit pins down. Borkar's paper does not discuss reinforcement
+learning, and his main theorems assume a gradient drift; the temporal-difference drift is not a gradient,
+so here only the general sliding description is used and the codimension-2 question is examined
+empirically.
 
 ## Setting
 
-Linear action values Q_θ(s, a) = φ(s, a)ᵀθ, a frozen target network θ̄ (the inner loop between target
-synchronisations) and the Double-SOR target
+Linear action values Q_θ(s, a) = φ(s, a)ᵀθ, a fixed behaviour distribution d(s, a), a frozen target
+network θ̄ (the inner loop between target synchronisations, except where stated), and the Double-SOR target
 
 $$
 y_\omega(s,a;\theta) = \omega\Bigl(r + \gamma \sum_{s'} P(s'\mid s,a)\, \bar Q\bigl(s', \arg\max_b Q_\theta(s',b)\bigr)\Bigr)
   + (1-\omega)\, \bar Q\bigl(s, \arg\max_c Q_\theta(s,c)\bigr),
 $$
 
-with ω = 1 giving Double Q-learning's target and ω ≠ 1 Double SOR's (Kamanchi et al., 2020). The
-expected drift h(θ) = Σ d(s, a) φ(s, a) [y_ω − Q_θ(s, a)] jumps across each tie hyperplane
-M_s = {Q_θ(s, 1) = Q_θ(s, 2)}, because the argmax selects which target value Q̄ is used.
+with ω = 1 giving Double Q-learning's target (van Hasselt et al., 2016) and ω ≠ 1 Double SOR's (Kamanchi
+et al., 2020). The expected drift h(θ) = Σ d(s, a) φ(s, a) [y_ω − Q_θ(s, a)] jumps across each tie
+hyperplane M_s = {Q_θ(s, 1) = Q_θ(s, 2)} because the argmax selects which target value Q̄ is used. Unlike
+Gopalan & Thoppe's setting, the behaviour distribution is fixed, so the only discontinuity is in the
+target.
 
-**Instances.** 300 random MDPs (6 states, 2 actions, Dirichlet(0.5) transitions, normal rewards,
-4-dimensional normal features, Dirichlet state–action weighting d, random θ̄ and θ₀), γ = 0.9, and
+**Instances.** Random MDPs (6 states, 2 actions, Dirichlet(0.5) transitions, normal rewards,
+4-dimensional normal features, Dirichlet state–action weighting d, random θ̄ and θ₀), γ = 0.9,
 ω ∈ {0.7, 1.0, 1.3, 1.6}.
 
-**Procedure** (per instance and ω):
-1. integrate the expected drift (Euler, step 0.01, 40,000 steps) and detect **codimension-1
-   sliding**: in the last quarter, exactly one state's greedy action flips at least 20 times while θ is
-   at rest;
-2. compute α from the two one-sided drifts at θ projected onto M_s, and check the attraction
-   condition h⁺ₙ < 0 < h⁻ₙ;
-3. run the **stochastic algorithm** from the same start (sampled (s, a) ~ d and s′ ~ P, step size
-   0.002, 300,000 updates) and measure, over the second half, the fraction of updates with action 1
-   greedy at the sliding state and the churn rate (greedy flips per update).
+**Procedure.** For each instance and ω: integrate the expected drift (Euler, step 0.01) and detect
+codimension-1 sliding (in the last quarter, exactly one state's greedy action flips at least 20 times
+while θ is at rest); compute α from the two one-sided drifts at θ projected onto M_s and check the
+attraction condition h⁺ₙ < 0 < h⁻ₙ; run the stochastic algorithm (sampled (s, a) ~ d and s′ ~ P,
+constant step size) from the same start and measure the occupancy and churn rate (greedy flips per
+update) over the second half.
 
 ## Results
+
+### Codimension-1 sliding (300 instances × 4 values of ω, step size 0.002)
 
 | ω | instances with codimension-1 sliding | ODE occupancy − α (median abs.) | stochastic occupancy − α (median abs.) | correlation (α, stochastic occupancy) | within 0.05 | churn (flips per update, median) |
 |---|---|---|---|---|---|---|
@@ -84,52 +97,121 @@ Detected chattering cases failing the Filippov attraction condition: 0.
 
 ![Prediction error against the strength of the normal drift](figures/error_vs_push.png)
 
+### Step-size limit (codimension 1)
+
+60 sliding cases re-run with the ODE time horizon fixed (600 time units).
+
+| step size | median \|occupancy − α\| | mean | correlation with α | churn (flips per update, median) |
+|---|---|---|---|---|
+| 0.008 | 0.065 | 0.113 | 0.83 | 0.0343 |
+| 0.004 | 0.063 | 0.088 | 0.91 | 0.0275 |
+| 0.002 | 0.041 | 0.071 | 0.93 | 0.0241 |
+| 0.001 | 0.029 | 0.057 | 0.95 | 0.0234 |
+| 0.0005 | 0.014 | 0.040 | 0.97 | 0.0232 |
+
+### Moving target (Polyak averaging at rate β, step size 0.002)
+
+| β | cases | still churning (> 0.005 flips per update) | churn (median) | late windows with mixed greedy action (median) |
+|---|---|---|---|---|
+| 0 | 30 | 100% | 0.0357 | 1.00 |
+| 1e-05 | 30 | 13% | 0.0000 | 0.00 |
+| 0.0001 | 30 | 7% | 0.0000 | 0.00 |
+
+### Codimension 2
+
+45 instances with two states chattering at once and a non-empty Filippov feasible set (scan of 1,500 instances at each of ω = 1.0 and 1.3). Occupancies are over the four sign patterns; distances are L1.
+
+| quantity | median |
+|---|---|
+| width of the feasible set (largest range of any pattern's weight) | 0.144 |
+| distance of the Euler occupancy to the feasible set, dt = 0.01 | 0.0054 |
+| same, dt = 0.0025 | 0.0023 |
+| change in Euler occupancy between dt = 0.01 and 0.0025 | 0.0076 |
+| distance of the stochastic occupancy to the feasible set, a = 0.002 | 0.146 |
+| same, a = 0.0005 | 0.083 |
+| stochastic (a = 0.002) vs Euler (dt = 0.0025) occupancy | 0.344 |
+| stochastic (a = 0.0005) vs Euler (dt = 0.0025) occupancy | 0.230 |
+| product of codimension-1 weights vs Euler occupancy (12 cases with both weights defined) | 0.510 |
+
+![Step-size limit](figures/stepsize_limit.png)
+
 ## Observations
 
-1. **Sliding on tie manifolds occurs in about one instance in six** (14–20% depending on ω). In those
-   instances the greedy action at one state flips on about 3% of stochastic updates, sustained by the
-   expected dynamics rather than by noise. Every detected case satisfies the Filippov attraction
-   condition.
-2. **The Filippov weight predicts the split of time between the two actions.** For the expected
-   dynamics the agreement is within about 0.001; for the stochastic algorithm the median absolute error
-   is 0.04 and the correlation 0.88 (0.90–0.97 for ω ≤ 1.3).
-3. **Deviations occur where the small-step limit is not reached.** When the weaker of the two normal
-   pushes is strong (> 0.02) the median error is 0.019; when it is weak (< 0.005), noise is comparable
-   to the drift at this step size and the median error rises to 0.10.
-4. **Over-relaxation does not remove sliding.** Its frequency is non-monotone in ω and the churn
-   rate stays at about 3%. Agreement is weaker at ω = 1.6 (correlation 0.73); a plausible reason is
-   that SOR's (1 − ω) Q̄(s, argmax) term adds a second discontinuity at the same state.
+1. **Sliding on greedy-region boundaries is common with a frozen target.** About one instance in six
+   (14–20% depending on ω) is trapped on a tie hyperplane, and every detected case satisfies the
+   Filippov attraction condition.
+2. **The churn there follows the Filippov occupancy, and converges to it in the small-step limit.** The
+   median error falls from 0.065 to 0.014 and the correlation rises from 0.83 to 0.97 as the step size
+   falls from 0.008 to 0.0005, roughly like √a. Cases with a weak normal drift converge more slowly.
+3. **Sliding churn is a property of the dynamics, not of the learning rate.** Flips per update level off
+   at about 2.3% as the step shrinks: a smaller step tightens the oscillation around the boundary but
+   does not stop the greedy action from switching.
+4. **Over-relaxation does not remove it.** Sliding frequency is non-monotone in ω and churn stays near 3%.
+5. **With a moving target, sliding largely disappears** (100% → 13% → 7% of cases still churning at
+   β = 0, 10⁻⁵, 10⁻⁴). In this setting the discontinuity comes from the mismatch between the online and
+   target networks: when θ̄ = θ, the Double target reduces to the plain max, which is continuous. With
+   periodic hard synchronisation, as in standard DQN, the mismatch reappears after every sync, so sliding
+   can recur within each inner loop. In Gopalan & Thoppe's setting, ε-greedy sampling adds a discontinuity
+   that does not vanish this way.
+6. **In codimension 2, Filippov's conditions leave real ambiguity, and the stochastic algorithm has not
+   yet resolved it at these step sizes.** The feasible set of splits between the four sign patterns has a
+   median width of 0.14. The Euler dynamics select a definite, step-independent point in it. The
+   stochastic occupancy starts outside the set and approaches it as the step shrinks (distance 0.146 →
+   0.083), but remains further from the Euler point (L1 0.23) than the set is wide, so whether noise
+   selects the same split as the deterministic dynamics, or a different one, is open here. A product of
+   codimension-1 weights is a poor description (L1 0.51).
+
+## Policy churn through this lens
+
+- **Churn can be structural.** On an attracting boundary, neither greedy action can persist: each one
+  selects a target that moves the values toward the other. The greedy action then flips at a steady rate
+  that removing noise does not eliminate.
+- **Sliding makes a greedy learner act like a stochastic one.** On the boundary the agent plays one
+  action a fraction α of the time and the other otherwise, a mixed policy whose probabilities are set by
+  the geometry of the update. This gives a quantitative form to the view of churn as implicit exploration
+  (Schaul et al., 2022) for the churn that sliding produces.
+- **Sliding is one source of churn, not all of it.** Churn also arises from noise near small action
+  gaps, from generalisation across states, from target synchronisation and from shifting data. How much
+  of the churn of a deep RL agent comes from sliding has not been measured.
+
+## What is and is not new here
+
+- **Not new:** greedy-region boundaries as discontinuities of the Q-learning drift; sliding and chattering
+  on them; their analysis by differential inclusions (Gopalan & Thoppe, 2025; earlier chattering results:
+  Gordon, 1996). Codimension-1 Filippov sliding itself is classical (Filippov, 1988).
+- **Added here:** quantitative evidence that churn on attracting boundaries follows the Filippov
+  occupancy and converges to it as the step shrinks; that sliding churn per update does not vanish with
+  the step size; prevalence across random instances; the dependence on online–target mismatch; the
+  Double-SOR variant; and a first empirical look at codimension-2 selection for a non-gradient
+  Q-learning drift.
 
 ## Limitations
 
-- The target network is frozen. With a moving target the sliding points move as well; Borkar (2026,
-  Section 5) discusses such slowly varying structure, but it is not tested here.
-- Linear features and small random MDPs. Neural networks add discontinuities of their own (ReLU
-  activation boundaries) that are not studied.
-- Only codimension-1 sliding is analysed; instances where several states chatter at once are excluded.
-- The detection thresholds (20 flips, θ at rest) are choices that affect the counts in the first table
-  but not the occupancy comparison.
+- Linear features and small random MDPs; a fixed behaviour distribution (no ε-greedy discontinuity).
+- Sliding was detected only when the iterate comes to rest on the boundary (sliding-mode equilibria); the
+  velocity along the boundary during sliding was not compared with g.
+- Codimension 2: 45 cases and step sizes down to 0.0005 only; smaller steps are needed to settle the
+  selection question.
+- The detection thresholds (20 flips, θ at rest) affect the counts but not the occupancy comparisons.
 
 ## Usage
 
 ```bash
 pip install -r requirements.txt
-python -m pytest              # three checks, about two seconds
-python run.py                 # 1,200 runs, about 15 minutes on 3 cores
-python analyze.py             # results/summary.md and figures/
+python -m pytest                               # three checks, about two seconds
+python run.py && python analyze.py             # codimension-1 experiment, ~15 min on 3 cores
+python run_extensions.py stepsize moving codim2 --workers 3 && python analyze_extensions.py   # ~1-2 h
 ```
-
-`results/results.jsonl` holds one record per instance and ω, with the predicted α, the attraction
-check, the normal drift components and the measured occupancies and churn.
 
 ## Layout
 
 ```
-filippov/dynamics.py   instances, expected drift, Euler and stochastic dynamics, sliding detection, α
-run.py                 the experiment grid
-analyze.py             tables and figures
-tests/                 a one-dimensional Filippov check and consistency checks
-results/, figures/     outputs
+filippov/dynamics.py     instances, expected drift, Euler and stochastic dynamics, codimension-1 detection, α
+filippov/extensions.py   step-size runs, moving target, codimension-2 detection and the Filippov feasible set
+run.py, analyze.py                       codimension-1 experiment, tables and figures
+run_extensions.py, analyze_extensions.py extension experiments, tables and figure
+tests/                   a one-dimensional Filippov check and consistency checks
+results/, figures/       outputs
 ```
 
 ## References
@@ -137,11 +219,15 @@ results/, figures/     outputs
 - Borkar, V. S. (2026). Stochastic gradient descent with discontinuity across a manifold.
   *arXiv:2608.07618*.
 - Borkar, V. S. (2022). *Stochastic Approximation: A Dynamical Systems Viewpoint* (2nd ed.). Springer.
-- Filippov, A. F. (1988). *Differential Equations with Discontinuous Righthand Sides*. Kluwer
-  Academic.
-- Kamanchi, C., Diddigi, R. B., & Bhatnagar, S. (2020). Successive over-relaxation Q-learning.
-  *IEEE Control Systems Letters*, 4(1).
-- Schaul, T., Barreto, A., Quan, J., & Ostrovski, G. (2022). The phenomenon of policy churn.
-  *Advances in Neural Information Processing Systems (NeurIPS)*.
-- van Hasselt, H., Guez, A., & Silver, D. (2016). Deep reinforcement learning with double
-  Q-learning. *AAAI Conference on Artificial Intelligence*.
+- Filippov, A. F. (1988). *Differential Equations with Discontinuous Righthand Sides*. Kluwer Academic.
+- Gopalan, A., & Thoppe, G. (2025). Does DQN learn? *IEEE Transactions on Automatic Control*;
+  *arXiv:2205.13617*.
+- Gordon, G. J. (1996). Chattering in SARSA(λ). CMU Learning Lab internal report.
+- Kamanchi, C., Diddigi, R. B., & Bhatnagar, S. (2020). Successive over-relaxation Q-learning. *IEEE
+  Control Systems Letters*, 4(1).
+- Schaul, T., Barreto, A., Quan, J., & Ostrovski, G. (2022). The phenomenon of policy churn. *Advances in
+  Neural Information Processing Systems (NeurIPS)*.
+- Sutton, R. S. (1999). Open theoretical questions in reinforcement learning. *European Conference on
+  Computational Learning Theory (EuroCOLT)*.
+- van Hasselt, H., Guez, A., & Silver, D. (2016). Deep reinforcement learning with double Q-learning.
+  *AAAI Conference on Artificial Intelligence*.
