@@ -141,3 +141,40 @@ def distance_to_feasible(H, N, occ):
 
 __all__ = ["instance", "detect_chattering", "ode_traj", "stochastic_track", "pattern_drifts",
            "filippov_feasible_set", "distance_to_feasible"]
+
+
+def stochastic_batch(inst, w, states, step, horizon, seeds, frac=0.5):
+    """stochastic_track's sign-pattern occupancy for several noise seeds at once (vectorised over
+    seeds). Returns an array [len(seeds), 2**len(states)]."""
+    phi, P, R, d = inst["phi"], inst["P"], inst["R"], inst["d"]
+    qbar = phi @ inst["theta_bar"]
+    n, steps = len(seeds), int(horizon / step)
+    rngs = [np.random.default_rng(s) for s in seeds]
+    cdf = P.cumsum(-1)
+    flat_d = d.reshape(-1)
+    theta = np.tile(inst["theta0"], (n, 1))
+    states = list(states)
+    m = len(states)
+    counts = np.zeros((n, 2 ** m))
+    start = int(steps * (1 - frac))
+    weights = 2 ** np.arange(m - 1, -1, -1)
+    rows = np.arange(n)
+    chunk = 100_000
+    for c0 in range(0, steps, chunk):
+        c1 = min(steps, c0 + chunk)
+        idx = np.stack([r.choice(S * A, size=c1 - c0, p=flat_d) for r in rngs], 1)    # [chunk, n]
+        u = np.stack([r.random(c1 - c0) for r in rngs], 1)
+        for j in range(c1 - c0):
+            s, a = np.divmod(idx[j], A)
+            s2 = np.minimum((u[j][:, None] > cdf[s, a]).sum(1), S - 1)
+            q_s2 = np.einsum("nak,nk->na", phi[s2], theta)
+            q_s = np.einsum("nak,nk->na", phi[s], theta)
+            g2 = (q_s2[:, 1] > q_s2[:, 0]).astype(int)
+            g1 = (q_s[:, 1] > q_s[:, 0]).astype(int)
+            y = w * (R[s, a] + GAMMA * qbar[s2, g2]) + (1 - w) * qbar[s, g1]
+            theta += step * (y - q_s[rows, a])[:, None] * phi[s, a]
+            if c0 + j >= start:
+                g = np.einsum("nmak,nk->nma", phi[states][None].repeat(n, 0), theta)
+                bits = (g[:, :, 1] > g[:, :, 0]).astype(int)
+                counts[rows, bits @ weights] += 1
+    return counts / (steps - start)

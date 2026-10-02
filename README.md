@@ -135,6 +135,30 @@ Detected chattering cases failing the Filippov attraction condition: 0.
 
 ![Step-size limit](figures/stepsize_limit.png)
 
+### Codimension 2 at small step sizes: what selects the split
+
+The 45 codimension-2 cases above, re-run with four independent noise seeds at each of four step sizes
+(`run_codim2_small.py`). Criteria, fixed before the run: the split is **definite** if the spread between
+seeds (mean pairwise L1 between their occupancy vectors) shrinks with the step; it is **on the Filippov
+set** if the distance of the seed-averaged occupancy to the feasible set goes to 0; it **differs from
+the deterministic selection** if its L1 gap to the Euler occupancy stays clearly above the seed spread and
+does not trend to 0.
+
+| step size | seed spread (median L1) | distance to Filippov set (median) | gap to deterministic occupancy (median L1) | cases where gap > 2 × spread |
+|---|---|---|---|---|
+| 0.002 | 0.087 | 0.177 | 0.350 | 80% |
+| 0.0005 | 0.052 | 0.056 | 0.206 | 76% |
+| 0.0002 | 0.031 | 0.037 | 0.204 | 84% |
+| 0.0001 | 0.022 | 0.022 | 0.171 | 91% |
+
+45 cases; median width of the Filippov feasible set 0.144.
+
+![Codimension-2 selection](figures/codim2_selection.png)
+
+Between the two smallest step sizes the per-case gap to the Euler occupancy changed by a median factor of
+0.93: it was flat (within 5%) in about half of the cases and still fell by more than 20% in about a
+quarter. At a = 10⁻⁴ the median gap is 10.4 times the seed spread.
+
 ## Observations
 
 1. **Sliding on greedy-region boundaries is common with a frozen target.** About one instance in six
@@ -153,13 +177,17 @@ Detected chattering cases failing the Filippov attraction condition: 0.
    periodic hard synchronisation, as in standard DQN, the mismatch reappears after every sync, so sliding
    can recur within each inner loop. In Gopalan & Thoppe's setting, ε-greedy sampling adds a discontinuity
    that does not vanish this way.
-6. **In codimension 2, Filippov's conditions leave real ambiguity, and the stochastic algorithm has not
-   yet resolved it at these step sizes.** The feasible set of splits between the four sign patterns has a
-   median width of 0.14. The Euler dynamics select a definite, step-independent point in it. The
-   stochastic occupancy starts outside the set and approaches it as the step shrinks (distance 0.146 →
-   0.083), but remains further from the Euler point (L1 0.23) than the set is wide, so whether noise
-   selects the same split as the deterministic dynamics, or a different one, is open here. A product of
-   codimension-1 weights is a poor description (L1 0.51).
+6. **In codimension 2, noise selects a definite split, different from the deterministic one.** The
+   Filippov conditions leave a family of admissible splits between the four sign patterns (median width
+   0.14). As the step size falls from 0.002 to 10⁻⁴, independent noise seeds converge to the same split
+   (spread 0.087 → 0.022), which lies in the Filippov feasible set (distance → 0.022), while its gap to the
+   split selected by the Euler-discretised expected dynamics stays near 0.17–0.20, about ten times the seed
+   spread. This is consistent with Borkar's (2026) view that noise determines the averaging measure in
+   codimension ≥ 2, here for a non-gradient drift that his theorem does not cover. His theorem's specific
+   prediction (weights from a large-deviations potential) was not computed. The gap was still drifting
+   down slowly in some cases, so convergence to the Euler point at much smaller steps is not excluded,
+   and "deterministic" refers to one scheme, fixed-step Euler; another discretisation may select
+   differently. A product of codimension-1 weights is a poor description (L1 0.51).
 
 ## Policy churn through this lens
 
@@ -182,16 +210,17 @@ Detected chattering cases failing the Filippov attraction condition: 0.
 - **Added here:** quantitative evidence that churn on attracting boundaries follows the Filippov
   occupancy and converges to it as the step shrinks; that sliding churn per update does not vanish with
   the step size; prevalence across random instances; the dependence on online–target mismatch; the
-  Double-SOR variant; and a first empirical look at codimension-2 selection for a non-gradient
-  Q-learning drift.
+  Double-SOR variant; and evidence that in codimension 2 the noisy algorithm selects a definite
+  Filippov-admissible split that differs from the deterministic (Euler) one, for a non-gradient Q-learning
+  drift.
 
 ## Limitations
 
 - Linear features and small random MDPs; a fixed behaviour distribution (no ε-greedy discontinuity).
 - Sliding was detected only when the iterate comes to rest on the boundary (sliding-mode equilibria); the
   velocity along the boundary during sliding was not compared with g.
-- Codimension 2: 45 cases and step sizes down to 0.0005 only; smaller steps are needed to settle the
-  selection question.
+- Codimension 2: 45 cases, step sizes down to 10⁻⁴, four noise seeds; the deterministic reference is
+  fixed-step Euler only; Borkar's predicted measure was not computed.
 - The detection thresholds (20 flips, θ at rest) affect the counts but not the occupancy comparisons.
 
 ## Usage
@@ -201,6 +230,7 @@ pip install -r requirements.txt
 python -m pytest                               # three checks, about two seconds
 python run.py && python analyze.py             # codimension-1 experiment, ~15 min on 3 cores
 python run_extensions.py stepsize moving codim2 --workers 3 && python analyze_extensions.py   # ~1-2 h
+python run_codim2_small.py --workers 3 && python analyze_codim2_small.py          # ~2-3 h
 ```
 
 ## Layout
@@ -210,6 +240,7 @@ filippov/dynamics.py     instances, expected drift, Euler and stochastic dynamic
 filippov/extensions.py   step-size runs, moving target, codimension-2 detection and the Filippov feasible set
 run.py, analyze.py                       codimension-1 experiment, tables and figures
 run_extensions.py, analyze_extensions.py extension experiments, tables and figure
+run_codim2_small.py, analyze_codim2_small.py  codimension-2 selection at small step sizes
 tests/                   a one-dimensional Filippov check and consistency checks
 results/, figures/       outputs
 ```
